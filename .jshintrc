@@ -1,0 +1,8 @@
+{
+    "node": true,
+    "undef": true,
+    "mocha": true,
+    "unused": true,
+    "varstmt": true,
+    "esversion": 6
+}
