@@ -1,103 +1,139 @@
-let WebSocketServer = require('ws').Server;
-
 const COMMAND_MESSAGE = 'message';
 const COMMAND_CONNECT = 'connect';
+const SYSTEM_USER = 'system';
+
+const PORT = process.env.PORT || 8082;
+const INACTIVITY_TIMEOUT = process.env.INACTIVITY_TIMEOUT | 1200000;
+
 
 class Server {
-    constructor(WebSocket) {
-        this.wss = new WebSocket({port: 8082});
+    constructor(WebSocket, Logger) {
+        this.wss = new WebSocket({port: PORT});
+        this.logger = Logger.createLogger({name: 'fs-chat'});
         this.clients = [];
     }
 
     Run() {
+        this.logger.info("Server started");
         this.wss.on('connection', this.connectionHandler.bind(this));
     }
 
     connectionHandler(ws) {
-        
         ws.on('message', (message) => {
             this.dispatch(ws, message);
         });
-        ws.on('close', () => {
+        ws.on('close', (code) => {
+            let user = this.findUser(ws);
             this.clients.forEach((client, index) => {
                 if(client.conn === ws) {
                     this.clients.splice(index, 1);
                 }
             });
-            console.log('closing');
-        });
-        ws.on('error', (error) => {
-            //TODO: implement error Handler
-            console.log(error);
+            if (code === 1001) {
+                // on server shutdown
+                return;
+            }
+            if (user) {
+                if (code === 1003) {
+                    this.broadcast(SYSTEM_USER, user.name + ' was disconnected due to inactivity');
+                } {
+                    this.broadcast(SYSTEM_USER, user.name + ' left the chat, connection lost');
+                }
+            }
         });
     }
 
     dispatch(ws, message) {
-        //parse protocol /message {Message}
-        //               /connect {Name} 
-        // switch on 2 events - register, broadcast
-        // if register check if unique name, then add to clients array, and broadcast info that client has connected
-        // if broadcast send - name + message to all registered cleints
-        // if disconnect remove user from client array, close connection, and broadcast event that user has disconnected
-        // {command, payload }
-        // 
         try {
             message = JSON.parse(message);
         } catch ( exception ) {
-            // Log invalid json data
+            this.logger.warn({err: exception}, 'Could not parse incoming message')
             return;
         }
-
         if ( !message.hasOwnProperty('command') ) {
-            // Log wrong protocol interface
             return;
         }
-
+        let user = null;
         switch (message.command) {
+            
             case COMMAND_CONNECT:
                 if ( !message.hasOwnProperty('name') ) {
-                    // Log wrong protocol interface
                     return;
                 }
-                console.log('client added:', message.name);
-                this.clients.push({ conn: ws, name: message.name });
-                this.broadcast('has joined chat.', ws);
+                if (this.userExists(message.name)) {
+                    ws.close(1000, "Failed to connect. Nickname already taken.");
+                    return;
+                }
+
+                user = { conn: ws, name: message.name };
+                user.timeout = this.inactivityTimeout(ws, user);
+                this.clients.push(user);
+
+                this.broadcast(SYSTEM_USER, user.name + ' has joined chat.');
                 break;
             case COMMAND_MESSAGE:
+                user = this.findUser(ws);
                 if ( !message.hasOwnProperty('text') ) {
                     // Log wrong protocol interface
                     return;
                 }
-
-                console.log('broadcasting message:', message.text);
-                this.broadcast(message.text, ws);
-                break;    
+                
+                clearTimeout(user.timeout);
+                this.broadcast(user.name, message.text);
+                user.timeout = this.inactivityTimeout(ws, user);
+                break;
         }
 
     }
 
-    broadcast(text, fromConnection) {
-        let user = this.findUser(fromConnection);
-        console.log(user);
+    inactivityTimeout(socket, user) {
+        return setTimeout(() => {
+            socket.close(1003, "Disconnected by the server due to inactivity.");
+            this.logger.info({user: user.name}, 'User was disconnected due to timeout.');
+        }, INACTIVITY_TIMEOUT);
+    }
+
+    broadcast(author, text) {
         this.clients.forEach((client) => {
-            client.conn.send(JSON.stringify({userName: user, text: text}));
+            client.conn.send(JSON.stringify({userName: author, text: text}));
         });
     }
 
     findUser(fromConn) {
-        let username = '';
+        let user = null;
         this.clients.forEach((client) => {
             if(client.conn === fromConn) {
-                username =  client.name; 
+                user = client; 
             }
         });
 
-        return username;
+        return user;
+    }
+
+    userExists(name) {
+        let exists = false;
+        this.clients.forEach((client) => {
+            if(client.name === name) {
+                exists = true; 
+            }
+        });
+        return exists;
+    }
+
+    gracefullyShutdown() {
+        this.clients.forEach((client) => {
+            client.conn.close(1001, 'Server unavailable.');
+        });
+        this.clients = [];
+        this.wss.close((error) => {
+            if (error) {
+                this.logger.error({err:error}, 'Something went wrong while shutting down.');
+            }
+        });
+        this.logger.info('Server shutdown.');
+        process.exit(1);
     }
 
 }
 
-let server = new Server(WebSocketServer);
-
-server.Run();
-
+module.exports = Server;
