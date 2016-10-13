@@ -3,7 +3,7 @@ const COMMAND_CONNECT = 'connect';
 const SYSTEM_USER = 'system';
 
 const PORT = process.env.PORT || 8082;
-const INACTIVITY_TIMEOUT = process.env.INACTIVITY_TIMEOUT | 1200000;
+const INACTIVITY_TIMEOUT = process.env.INACTIVITY_TIMEOUT || 60000;
 
 
 class Server {
@@ -30,13 +30,13 @@ class Server {
                 }
             });
             if (code === 1001) {
-                // on server shutdown
                 return;
             }
             if (user) {
                 if (code === 1003) {
                     this.broadcast(SYSTEM_USER, user.name + ' was disconnected due to inactivity');
-                } {
+                } else {
+                    this.logger.info({user: user.name}, 'User left the chat.');
                     this.broadcast(SYSTEM_USER, user.name + ' left the chat, connection lost');
                 }
             }
@@ -61,6 +61,7 @@ class Server {
                     return;
                 }
                 if (this.userExists(message.name)) {
+                    this.logger.info({user: message.name}, 'Username allready exists.');
                     ws.close(1000, "Failed to connect. Nickname already taken.");
                     return;
                 }
@@ -70,16 +71,17 @@ class Server {
                 this.clients.push(user);
 
                 this.broadcast(SYSTEM_USER, user.name + ' has joined chat.');
+                this.logger.info({user: user.name}, 'User joined the chat');
                 break;
             case COMMAND_MESSAGE:
                 user = this.findUser(ws);
                 if ( !message.hasOwnProperty('text') ) {
-                    // Log wrong protocol interface
                     return;
                 }
                 
                 clearTimeout(user.timeout);
                 this.broadcast(user.name, message.text);
+                this.logger.info({user: user.name, message: message.text}, 'User sent message.');
                 user.timeout = this.inactivityTimeout(ws, user);
                 break;
         }
