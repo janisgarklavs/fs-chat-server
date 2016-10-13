@@ -1,10 +1,15 @@
 let WebSocketServer = require('ws').Server;
 let bunyan = require('bunyan');
+let sanitize = require('validator');
 
 let Server = require('./server');
 
-let server = new Server(WebSocketServer, bunyan);
+let chatServer = new Server(WebSocketServer, bunyan, sanitize);
 
-process.on('SIGINT', server.gracefullyShutdown.bind(server)).on('SIGTERM', server.gracefullyShutdown.bind(server));
-server.Run();
+process
+    .on('SIGINT', chatServer.gracefullyShutdown.bind(chatServer))
+    .on('SIGTERM', chatServer.gracefullyShutdown.bind(chatServer));
 
+chatServer.Run();
+
+module.exports = chatServer;

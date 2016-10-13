@@ -7,9 +7,10 @@ const INACTIVITY_TIMEOUT = process.env.INACTIVITY_TIMEOUT || 60000;
 
 
 class Server {
-    constructor(WebSocket, Logger) {
+    constructor(WebSocket, Logger, sanitize) {
         this.wss = new WebSocket({port: PORT});
         this.logger = Logger.createLogger({name: 'fs-chat'});
+        this.sanitize = sanitize;
         this.clients = [];
     }
 
@@ -19,7 +20,7 @@ class Server {
     }
 
     connectionHandler(ws) {
-        ws.on('message', (message) => {
+        ws.on('message', (message) => {           
             this.dispatch(ws, message);
         });
         ws.on('close', (code) => {
@@ -47,7 +48,7 @@ class Server {
         try {
             message = JSON.parse(message);
         } catch ( exception ) {
-            this.logger.warn({err: exception}, 'Could not parse incoming message')
+            this.logger.warn({err: exception}, 'Could not parse incoming message');
             return;
         }
         if ( !message.hasOwnProperty('command') ) {
@@ -60,6 +61,7 @@ class Server {
                 if ( !message.hasOwnProperty('name') ) {
                     return;
                 }
+                message.name = this.sanitize.escape(message.name);
                 if (this.userExists(message.name)) {
                     this.logger.info({user: message.name}, 'Username allready exists.');
                     ws.close(1000, "Failed to connect. Nickname already taken.");
@@ -78,10 +80,12 @@ class Server {
                 if ( !message.hasOwnProperty('text') ) {
                     return;
                 }
-                
+                message.text = this.sanitize.escape(message.text);
                 clearTimeout(user.timeout);
+
                 this.broadcast(user.name, message.text);
                 this.logger.info({user: user.name, message: message.text}, 'User sent message.');
+
                 user.timeout = this.inactivityTimeout(ws, user);
                 break;
         }
